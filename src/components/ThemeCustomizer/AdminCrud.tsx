@@ -1,13 +1,14 @@
-import { extractAulasFromProp, extractOpcionesFromAulas } from '@/common/helpers/toSentenceCase';
+//import { extractAulasFromProp, extractOpcionesFromAulas } from '@/common/helpers/toSentenceCase';
+import useDependencias from '@/hooks/useDependencias';
+import useServicios from '@/hooks/useServicios';
 import { useEffect, useState, useMemo } from 'react';
-import { Table, Button, Modal, Form, Tabs, Tab, Badge, Row, Col, InputGroup } from 'react-bootstrap';
+import { Table, Button, Modal, Form, Tabs, Tab, Badge, Row, Col, InputGroup, Spinner } from 'react-bootstrap';
+import Swal from 'sweetalert2';
 
 type Dependencia = { id: number; nombre: string; sede: string; ciudad: string; codigo: string; color_primary: string; statut?: string };
-type Aula = { id: number; dependencia_id: number; title: string; className: string; textClass: string; statut?: string };
-type Opcion = { id: number; idAula: number; dependencia_id: number; title: string; stock: number; className?: string; textClass?: string; statut?: string };
+//type Aula = { id: number; dependencia_id: number; title: string; className: string; textClass: string; statut?: string };
+//type Opcion = { id: number; idAula: number; dependencia_id: number; title: string; stock: number; className?: string; textClass?: string; statut?: string };
 type Equipo = { id: number; dependencia_id: number; opcion_id: number; serial: string; marca?: string; modelo?: string; estado: string; observaciones?: string };
-
-
 
 export default function AdminCrud({
   aulas: aulasProp,
@@ -19,26 +20,30 @@ export default function AdminCrud({
   inventario: Equipo[];
   dependencias: Dependencia[]
 }) {
-  const [activeTab, setActiveTab] = useState('opciones');
-  const [dependencias, setDependencias] = useState<Dependencia[]>([]);
-  const [aulas, setAulas] = useState<Aula[]>([]);
-  const [opciones, setOpciones] = useState<Opcion[]>([]);
+  const [activeTab, setActiveTab] = useState('dependencias');
   const [equipos, setEquipos] = useState<Equipo[]>([]);
-
   const [show, setShow] = useState(false);
   const [editing, setEditing] = useState<any>(null);
   const [formData, setFormData] = useState<any>({});
-
   const [searchDep, setSearchDep] = useState<string>('all');
   const [searchText, setSearchText] = useState('');
 
+  // HOOKS
+  const { dependencias, loading: loadingDep, createDependencia, updateDependencia, deleteDependencia, fetchDependencias } = useDependencias();
+  const { servicios, opciones, loading: loadingServ, fetchServicios, createServicio, updateServicio, deleteServicio, createOpcion, updateOpcion, deleteOpcion } = useServicios();
+
+  // Carga inicial
   useEffect(() => {
-    const deps = (dependenciasProp || []).map(d => ({...d, id: Number(d.id)}));
-    setDependencias(deps);
+    fetchDependencias();
+    fetchServicios();
+  }, [fetchDependencias, fetchServicios]);
+
+  // Fallback a props para equipos (aún sin hook)
+  useEffect(() => {
     setEquipos((inventarioProp || []).map(e => ({...e, id: Number(e.id), dependencia_id: Number(e.dependencia_id), opcion_id: Number(e.opcion_id)})));
-    setAulas(extractAulasFromProp(aulasProp as any));
-    setOpciones(extractOpcionesFromAulas(aulasProp as any));
-  }, [dependenciasProp, aulasProp, inventarioProp]);
+  }, [inventarioProp]);
+
+  const aulas = useMemo(() => servicios.map(s => ({ id: s.id, dependencia_id: s.dependencia_id, title: s.title, className: s.className, textClass: s.textClass, statut: s.statut })), [servicios]);
 
   const opcionesFiltradas = useMemo(() => {
     return opciones.filter(op => {
@@ -65,48 +70,57 @@ export default function AdminCrud({
   };
 
   const handleSave = async () => {
-    const list = getList();
-    if (editing) {
-      setList(list.map((i:any) => i.id === editing.id? {...formData, id: editing.id} : i));
-    } else {
-      const newId = Math.max(0,...list.map((i:any)=>i.id)) + 1;
-      setList([...list, {...formData, id: newId}]);
+    try {
+      let res: any;
+      switch(activeTab) {
+        case 'dependencias':
+          res = editing? await updateDependencia({...formData, id: editing.id}) : await createDependencia(formData);
+          break;
+        case 'aulas':
+          res = editing? await updateServicio({...formData, id: editing.id}) : await createServicio(formData);
+          break;
+        case 'opciones':
+          res = editing? await updateOpcion({...formData, id: editing.id}) : await createOpcion(formData);
+          break;
+        case 'equipos':
+          // TODO: conectar a useInventario cuando exista
+          Swal.fire('Pendiente', 'Conecta useInventario', 'info');
+          return;
+      }
+      if (res) Swal.fire({ icon: res.type || 'success', title: res.title || 'Guardado', text: res.message || '', timer: 1500, showConfirmButton: false });
+      setShow(false);
+    } catch (e: any) {
+      Swal.fire('Error', e.message, 'error');
     }
-    setShow(false);
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('¿Eliminar registro?')) return;
-    setList(getList().filter((i:any) => i.id!== id));
-  };
-
-  const getList = () => {
-    switch(activeTab){
-      case 'dependencias': return dependencias;
-      case 'aulas': return aulas;
-      case 'opciones': return opciones;
-      case 'equipos': return equipos;
-      default: return [];
-    }
-  };
-
-  const setList = (data:any) => {
-    switch(activeTab){
-      case 'dependencias': setDependencias(data); break;
-      case 'aulas': setAulas(data); break;
-      case 'opciones': setOpciones(data); break;
-      case 'equipos': setEquipos(data); break;
+    const conf = await Swal.fire({ title: '¿Eliminar?', icon: 'warning', showCancelButton: true, confirmButtonText: 'Sí' });
+    if (!conf.isConfirmed) return;
+    try {
+      let res: any;
+      switch(activeTab) {
+        case 'dependencias': res = await deleteDependencia(id); break;
+        case 'aulas': res = await deleteServicio(id); break;
+        case 'opciones': res = await deleteOpcion(id, Number(searchDep)); break;
+        case 'equipos': return;
+      }
+      Swal.fire({ icon: res?.type || 'success', title: res?.title || 'Eliminado', timer: 1200, showConfirmButton: false });
+    } catch (e: any) {
+      Swal.fire('Error', e.message, 'error');
     }
   };
 
   const renderTable = () => {
+    if (loadingDep || loadingServ) return <div className="text-center py-4"><Spinner size="sm" /> Cargando...</div>;
+
     switch(activeTab) {
       case 'dependencias':
         return (
           <Table striped hover size="sm">
             <thead className="table-light sticky-top"><tr><th>Sede</th><th>Nombre</th><th>Código</th><th>Ciudad</th><th>Color</th><th></th></tr></thead>
             <tbody>
-              {dependencias.map(d => (
+              {dependencias.map((d: any) => (
                 <tr key={d.id}>
                   <td><strong>{d.sede}</strong></td>
                   <td>{d.nombre}</td>
@@ -125,16 +139,17 @@ export default function AdminCrud({
       case 'aulas':
         return (
           <Table striped hover size="sm">
-            <thead className="table-light sticky-top"><tr><th>Categoría</th><th>Dependencia</th><th>Clase</th><th>Estado</th><th></th></tr></thead>
+            <thead className="table-light sticky-top"><tr><th>Servicio</th><th>Sede</th><th>Clase</th><th>Opciones</th><th></th></tr></thead>
             <tbody>
               {aulas.map(a => {
                 const dep = dependencias.find(d => Number(d.id) === Number(a.dependencia_id));
+                const ops = opciones.filter(o => o.idAula === a.id).length;
                 return (
                   <tr key={a.id}>
                     <td><span className={`badge ${a.className} ${a.textClass}`}>{a.title}</span></td>
                     <td>{dep?.codigo || '-'}</td>
                     <td><code>{a.className}</code></td>
-                    <td><Badge bg="success">{a.statut}</Badge></td>
+                    <td><Badge bg="info">{ops}</Badge></td>
                     <td className="text-end">
                       <Button variant="link" size="sm" onClick={()=>openModal(a)}><i className="mdi mdi-pencil"/></Button>
                       <Button variant="link" size="sm" className="text-danger" onClick={()=>handleDelete(a.id)}><i className="mdi mdi-delete"/></Button>
@@ -142,6 +157,31 @@ export default function AdminCrud({
                   </tr>
                 );
               })}
+            </tbody>
+          </Table>
+        );
+      case 'opciones':
+        return (
+          <Table striped hover size="sm">
+            <thead className="table-light sticky-top"><tr><th>Opción</th><th>Servicio Padre</th><th>Sede</th><th>Stock</th><th></th></tr></thead>
+            <tbody>
+              {opcionesFiltradas.map(item => {
+                const aulaPadre = aulas.find(a => Number(a.id) === Number(item.idAula));
+                const dep = dependencias.find(d => Number(d.id) === Number(item.dependencia_id));
+                return (
+                  <tr key={item.id}>
+                    <td><strong>{item.title}</strong></td>
+                    <td>{aulaPadre?.title || '-'}</td>
+                    <td><Badge bg="light" text="dark" style={{borderLeft:`4px solid ${dep?.color_primary}`}}>{dep?.codigo}</Badge></td>
+                    <td><Badge bg="info">{item.stock}</Badge></td>
+                    <td className="text-end">
+                      <Button variant="link" size="sm" onClick={()=>openModal(item)}><i className="mdi mdi-pencil"/></Button>
+                      <Button variant="link" size="sm" className="text-danger" onClick={()=>handleDelete(item.id)}><i className="mdi mdi-delete"/></Button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {opcionesFiltradas.length===0 && <tr><td colSpan={5} className="text-center text-muted py-4">Sin resultados</td></tr>}
             </tbody>
           </Table>
         );
@@ -170,31 +210,6 @@ export default function AdminCrud({
             </tbody>
           </Table>
         );
-      case 'opciones':
-        return (
-          <Table striped hover size="sm">
-            <thead className="table-light sticky-top"><tr><th>Servicio</th><th>Aula Padre</th><th>Sede</th><th>Stock</th><th></th></tr></thead>
-            <tbody>
-              {opcionesFiltradas.map(item => {
-                const aulaPadre = aulas.find(a => Number(a.id) === Number(item.idAula));
-                const dep = dependencias.find(d => Number(d.id) === Number(item.dependencia_id));
-                return (
-                  <tr key={item.id}>
-                    <td><strong>{item.title}</strong></td>
-                    <td>{aulaPadre?.title || '-'}</td>
-                    <td><Badge bg="light" text="dark" style={{borderLeft:`4px solid ${dep?.color_primary}`}}>{dep?.codigo}</Badge></td>
-                    <td><Badge bg="info">{item.stock}</Badge></td>
-                    <td className="text-end">
-                      <Button variant="link" size="sm" onClick={()=>openModal(item)}><i className="mdi mdi-pencil"/></Button>
-                      <Button variant="link" size="sm" className="text-danger" onClick={()=>handleDelete(item.id)}><i className="mdi mdi-delete"/></Button>
-                    </td>
-                  </tr>
-                );
-              })}
-              {opcionesFiltradas.length===0 && <tr><td colSpan={5} className="text-center text-muted py-4">Sin resultados</td></tr>}
-            </tbody>
-          </Table>
-        );
     }
   };
 
@@ -203,9 +218,9 @@ export default function AdminCrud({
       case 'dependencias':
         return (<Row><Col md={6}><Form.Group className="mb-2"><Form.Label>Nombre</Form.Label><Form.Control value={formData.nombre||''} onChange={e=>setFormData({...formData,nombre:e.target.value})}/></Form.Group></Col><Col md={3}><Form.Group className="mb-2"><Form.Label>Sede</Form.Label><Form.Control value={formData.sede||''} onChange={e=>setFormData({...formData,sede:e.target.value})}/></Form.Group></Col><Col md={3}><Form.Group className="mb-2"><Form.Label>Código</Form.Label><Form.Control value={formData.codigo||''} onChange={e=>setFormData({...formData,codigo:e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Ciudad</Form.Label><Form.Control value={formData.ciudad||''} onChange={e=>setFormData({...formData,ciudad:e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Color</Form.Label><Form.Control type="color" value={formData.color_primary||'#0d6efd'} onChange={e=>setFormData({...formData,color_primary:e.target.value})}/></Form.Group></Col></Row>);
       case 'aulas':
-        return (<Row><Col md={6}><Form.Group className="mb-2"><Form.Label>Título</Form.Label><Form.Control value={formData.title||''} onChange={e=>setFormData({...formData,title:e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Dependencia</Form.Label><Form.Select value={formData.dependencia_id||''} onChange={e=>setFormData({...formData,dependencia_id:+e.target.value})}>{dependencias.map(d=><option key={d.id} value={d.id}>{d.codigo} - {d.sede}</option>)}</Form.Select></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>ClassName</Form.Label><Form.Control value={formData.className||''} onChange={e=>setFormData({...formData,className:e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>TextClass</Form.Label><Form.Select value={formData.textClass||'text-white'} onChange={e=>setFormData({...formData,textClass:e.target.value})}><option>text-white</option><option>text-dark</option></Form.Select></Form.Group></Col></Row>);
+        return (<Row><Col md={6}><Form.Group className="mb-2"><Form.Label>Título Servicio</Form.Label><Form.Control value={formData.title||''} onChange={e=>setFormData({...formData,title:e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Sede</Form.Label><Form.Select value={formData.dependencia_id||''} onChange={e=>setFormData({...formData,dependencia_id:+e.target.value})}>{dependencias.map(d=><option key={d.id} value={d.id}>{d.codigo} - {d.sede}</option>)}</Form.Select></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>ClassName</Form.Label><Form.Control value={formData.className||'bg-primary'} onChange={e=>setFormData({...formData,className:e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>TextClass</Form.Label><Form.Select value={formData.textClass||'text-white'} onChange={e=>setFormData({...formData,textClass:e.target.value})}><option>text-white</option><option>text-dark</option></Form.Select></Form.Group></Col></Row>);
       case 'opciones':
-        return (<Row><Col md={8}><Form.Group className="mb-2"><Form.Label>Título</Form.Label><Form.Control value={formData.title||''} onChange={e=>setFormData({...formData,title:e.target.value})}/></Form.Group></Col><Col md={4}><Form.Group className="mb-2"><Form.Label>Stock</Form.Label><Form.Control type="number" value={formData.stock||1} onChange={e=>setFormData({...formData,stock:+e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Aula Padre</Form.Label><Form.Select value={formData.idAula||''} onChange={e=>setFormData({...formData,idAula:+e.target.value})}>{aulas.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}</Form.Select></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Dependencia</Form.Label><Form.Select value={formData.dependencia_id||''} onChange={e=>setFormData({...formData,dependencia_id:+e.target.value})}>{dependencias.map(d=><option key={d.id} value={d.id}>{d.sede}</option>)}</Form.Select></Form.Group></Col></Row>);
+        return (<Row><Col md={8}><Form.Group className="mb-2"><Form.Label>Título Opción</Form.Label><Form.Control value={formData.title||''} onChange={e=>setFormData({...formData,title:e.target.value})}/></Form.Group></Col><Col md={4}><Form.Group className="mb-2"><Form.Label>Stock</Form.Label><Form.Control type="number" value={formData.stock||1} onChange={e=>setFormData({...formData,stock:+e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Servicio Padre</Form.Label><Form.Select value={formData.idAula||''} onChange={e=>setFormData({...formData,idAula:+e.target.value})}>{aulas.map(a=><option key={a.id} value={a.id}>{a.title}</option>)}</Form.Select></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Sede</Form.Label><Form.Select value={formData.dependencia_id||''} onChange={e=>setFormData({...formData,dependencia_id:+e.target.value})}>{dependencias.map(d=><option key={d.id} value={d.id}>{d.sede}</option>)}</Form.Select></Form.Group></Col></Row>);
       case 'equipos':
         return (<Row><Col md={4}><Form.Group className="mb-2"><Form.Label>Serial</Form.Label><Form.Control value={formData.serial||''} onChange={e=>setFormData({...formData,serial:e.target.value})}/></Form.Group></Col><Col md={4}><Form.Group className="mb-2"><Form.Label>Marca</Form.Label><Form.Control value={formData.marca||''} onChange={e=>setFormData({...formData,marca:e.target.value})}/></Form.Group></Col><Col md={4}><Form.Group className="mb-2"><Form.Label>Modelo</Form.Label><Form.Control value={formData.modelo||''} onChange={e=>setFormData({...formData,modelo:e.target.value})}/></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Opción</Form.Label><Form.Select value={formData.opcion_id||''} onChange={e=>setFormData({...formData,opcion_id:+e.target.value})}>{opciones.map(o=><option key={o.id} value={o.id}>{o.title}</option>)}</Form.Select></Form.Group></Col><Col md={6}><Form.Group className="mb-2"><Form.Label>Estado</Form.Label><Form.Select value={formData.estado||'Disponible'} onChange={e=>setFormData({...formData,estado:e.target.value})}><option>Disponible</option><option>Prestado</option><option>Mantenimiento</option></Form.Select></Form.Group></Col></Row>);
     }
@@ -215,7 +230,7 @@ export default function AdminCrud({
     <div>
       <Tabs activeKey={activeTab} onSelect={k=>setActiveTab(k!)} className="mb-3 nav-bordered">
         <Tab eventKey="dependencias" title={`Sedes (${dependencias.length})`} />
-        <Tab eventKey="aulas" title={`Aulas (${aulas.length})`} />
+        <Tab eventKey="aulas" title={`Servicios (${aulas.length})`} />
         <Tab eventKey="opciones" title={`Opciones (${opcionesFiltradas.length}/${opciones.length})`} />
         <Tab eventKey="equipos" title={`Inventario (${equipos.length})`} />
       </Tabs>
@@ -225,13 +240,13 @@ export default function AdminCrud({
           <Col md={4}>
             <Form.Select size="sm" value={searchDep} onChange={e=>setSearchDep(e.target.value)}>
               <option value="all">Todas las sedes</option>
-              {dependencias.map(d => <option key={d.id} value={d.id}>{d.codigo} - {d.sede}</option>)}
+              {dependencias?.map(d => <option key={d.id} value={d.id}>{d.codigo} - {d.sede}</option>)}
             </Form.Select>
           </Col>
           <Col md={8}>
             <InputGroup size="sm">
               <InputGroup.Text><i className="mdi mdi-magnify"/></InputGroup.Text>
-              <Form.Control placeholder="Buscar servicio..." value={searchText} onChange={e=>setSearchText(e.target.value)} />
+              <Form.Control placeholder="Buscar opción..." value={searchText} onChange={e=>setSearchText(e.target.value)} />
               {searchText && <Button variant="outline-secondary" onClick={()=>setSearchText('')}>×</Button>}
             </InputGroup>
           </Col>
@@ -250,7 +265,9 @@ export default function AdminCrud({
         <Modal.Body>{renderForm()}</Modal.Body>
         <Modal.Footer>
           <Button variant="light" onClick={()=>setShow(false)}>Cancelar</Button>
-          <Button variant="primary" onClick={handleSave}>Guardar</Button>
+          <Button variant="primary" onClick={handleSave} disabled={loadingDep || loadingServ}>
+            {loadingDep || loadingServ? <Spinner size="sm"/> : 'Guardar'}
+          </Button>
         </Modal.Footer>
       </Modal>
     </div>
