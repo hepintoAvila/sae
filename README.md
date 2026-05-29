@@ -23,7 +23,13 @@ Sistema web para gestionar y reservar espacios físicos y equipos dentro de una 
 | Estilos | TailwindCSS / Bootstrap |
 
 > Actualiza esta sección con el stack real de tu proyecto
-
+sae/
+├── client/          # Frontend
+├── server/          # Backend API
+├── docs/            # Documentación
+├── .env.example     # Variables de entorno de ejemplo
+└── README.md
+> 
 ## 📦 Instalación
 
 1. **Clonar el repositorio**
